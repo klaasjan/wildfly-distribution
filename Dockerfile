@@ -1,7 +1,3 @@
-# HOW TO USE:
-# > docker build -t wildfly-dist .
-# > docker create --name wildfly-dist-cont wildfly-dist
-# > docker cp wildfly-dist-cont:/tmp/wildfly-10.1.0.Final.topicus4.tar.gz ./
 FROM centos:7
 
 ENV WILDFLY_VERSION 10.1.0.Final
