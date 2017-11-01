@@ -1,4 +1,4 @@
-# Wildfly - Java EE7 Full & Web Distribution
+# WildFly - Java EE7 Full & Web Distribution
 
 ### HOW TO BUILD:
 ```
