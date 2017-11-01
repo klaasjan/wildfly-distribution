@@ -1,0 +1,98 @@
+From 8921cd02e10de8bd341a0328ee598d5bcd239c4f Mon Sep 17 00:00:00 2001
+From: Vlad Mihalcea <mihalcea.vlad@gmail.com>
+Date: Tue, 10 Jan 2017 13:51:32 +0200
+Subject: [PATCH] HHH-11377 - ReflectHelper#getConstantValue should consider
+ digits as well
+
+---
+ build.gradle                                              |  8 ++++++++
+ .../java/org/hibernate/internal/util/ReflectHelper.java   |  2 +-
+ .../org/hibernate/internal/util/ReflectHelperTest.java    | 11 +++++++++++
+ .../hibernate/internal/util/hib3rnat3/C0nst4nts३.java   | 15 +++++++++++++++
+ 4 files changed, 35 insertions(+), 1 deletion(-)
+ create mode 100644 hibernate-core/src/test/java/org/hibernate/internal/util/hib3rnat3/C0nst4nts३.java
+
+diff --git a/build.gradle b/build.gradle
+index 3e055ae..b7bcfcb 100644
+--- a/build.gradle
++++ b/build.gradle
+@@ -146,6 +146,14 @@ subprojects { subProject ->
+ 	}
+ 	// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ 
++	// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
++	// compilation
++	compileJava.options.encoding = 'UTF-8'
++
++	tasks.withType(JavaCompile) {
++		options.encoding = 'UTF-8'
++	}
++
+ 	task compile
+ 	compile.dependsOn compileJava, processResources, compileTestJava, processTestResources
+ 
+diff --git a/hibernate-core/src/main/java/org/hibernate/internal/util/ReflectHelper.java b/hibernate-core/src/main/java/org/hibernate/internal/util/ReflectHelper.java
+index e5b847e..3d16239 100644
+--- a/hibernate-core/src/main/java/org/hibernate/internal/util/ReflectHelper.java
++++ b/hibernate-core/src/main/java/org/hibernate/internal/util/ReflectHelper.java
+@@ -36,7 +36,7 @@ import org.hibernate.type.Type;
+ public final class ReflectHelper {
+ 
+ 	private static final Pattern JAVA_CONSTANT_PATTERN = Pattern.compile(
+-			"[a-z]+\\.([A-Z]{1}[a-z]+)+\\$?([A-Z]{1}[a-z]+)*\\.[A-Z_\\$]+" );
++			"[a-z\\d]+\\.([A-Z]{1}[a-z\\d]+)+\\$?([A-Z]{1}[a-z\\d]+)*\\.[A-Z_\\$]+", Pattern.UNICODE_CHARACTER_CLASS);
+ 
+ 	public static final Class[] NO_PARAM_SIGNATURE = new Class[0];
+ 	public static final Object[] NO_PARAMS = new Object[0];
+diff --git a/hibernate-core/src/test/java/org/hibernate/internal/util/ReflectHelperTest.java b/hibernate-core/src/test/java/org/hibernate/internal/util/ReflectHelperTest.java
+index cf2e1cb..337540e 100644
+--- a/hibernate-core/src/test/java/org/hibernate/internal/util/ReflectHelperTest.java
++++ b/hibernate-core/src/test/java/org/hibernate/internal/util/ReflectHelperTest.java
+@@ -11,6 +11,7 @@ import javax.persistence.FetchType;
+ import org.hibernate.boot.registry.classloading.spi.ClassLoaderService;
+ import org.hibernate.boot.spi.SessionFactoryOptions;
+ import org.hibernate.engine.spi.SessionFactoryImplementor;
++import org.hibernate.internal.util.hib3rnat3.C0nst4nts३;
+ import org.hibernate.service.spi.ServiceRegistryImplementor;
+ 
+ import org.junit.Before;
+@@ -123,4 +124,14 @@ public class ReflectHelperTest {
+ 		assertEquals( Status.ON, value );
+ 		verify(classLoaderServiceMock, times(1)).classForName( eq("org.hibernate.internal.util.ReflectHelperTest$Status") );
+ 	}
++
++	@Test
++	public void test_getConstantValue_constant_digits() {
++
++		when( sessionFactoryOptionsMock.isConventionalJavaConstants() ).thenReturn( true );
++		when( classLoaderServiceMock.classForName( "org.hibernate.internal.util.hib3rnat3.C0nst4nts३" ) ).thenReturn( (Class) C0nst4nts३.class );
++		Object value = ReflectHelper.getConstantValue( "org.hibernate.internal.util.hib3rnat3.C0nst4nts३.ABC_DEF", sessionFactoryImplementorMock);
++		assertEquals( C0nst4nts३.ABC_DEF, value );
++		verify(classLoaderServiceMock, times(1)).classForName( eq("org.hibernate.internal.util.hib3rnat3.C0nst4nts३") );
++	}
+ }
+\ No newline at end of file
+diff --git a/hibernate-core/src/test/java/org/hibernate/internal/util/hib3rnat3/C0nst4nts३.java b/hibernate-core/src/test/java/org/hibernate/internal/util/hib3rnat3/C0nst4nts३.java
+new file mode 100644
+index 0000000..45ae620
+--- /dev/null
++++ b/hibernate-core/src/test/java/org/hibernate/internal/util/hib3rnat3/C0nst4nts३.java
+@@ -0,0 +1,15 @@
++/*
++ * Hibernate, Relational Persistence for Idiomatic Java
++ *
++ * License: GNU Lesser General Public License (LGPL), version 2.1 or later.
++ * See the lgpl.txt file in the root directory or <http://www.gnu.org/licenses/lgpl-2.1.html>.
++ */
++package org.hibernate.internal.util.hib3rnat3;
++
++/**
++ * @author Vlad Mihalcea
++ */
++public class C0nst4nts३ {
++
++	public static final String ABC_DEF = "xyz";
++}
+-- 
+2.9.5
+

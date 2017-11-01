@@ -1,0 +1,451 @@
+From fd38c1b2ba598756d08ea3978436609b0e36d30d Mon Sep 17 00:00:00 2001
+From: Vlad Mihalcea <mihalcea.vlad@gmail.com>
+Date: Wed, 14 Dec 2016 09:54:33 +0200
+Subject: [PATCH] HHH-4959 - Concurrent HQL parsing blocks on
+ ReflectHelper.classForName()
+
+Exclude JPQL and Criteria API aliases when searching for a Java constant value
+---
+ .../boot/internal/SessionFactoryBuilderImpl.java   |  11 ++
+ .../boot/internal/SessionFactoryOptionsImpl.java   |   6 +
+ .../boot/internal/SessionFactoryOptionsState.java  |   2 +
+ .../AbstractDelegatingSessionFactoryOptions.java   |   5 +
+ .../hibernate/boot/spi/SessionFactoryOptions.java  |   2 +
+ .../java/org/hibernate/cfg/AvailableSettings.java  |  11 ++
+ .../hql/internal/ast/QueryTranslatorImpl.java      |   3 +-
+ .../hql/internal/ast/tree/JavaConstantNode.java    |   3 +-
+ .../hql/internal/ast/util/LiteralProcessor.java    |   5 +-
+ .../hql/internal/classic/WhereParser.java          |   3 +-
+ .../org/hibernate/internal/util/ReflectHelper.java |  16 ++-
+ .../hibernate/internal/util/ReflectHelperTest.java | 126 +++++++++++++++++++++
+ 12 files changed, 181 insertions(+), 12 deletions(-)
+ create mode 100644 hibernate-core/src/test/java/org/hibernate/internal/util/ReflectHelperTest.java
+
+diff --git a/hibernate-core/src/main/java/org/hibernate/boot/internal/SessionFactoryBuilderImpl.java b/hibernate-core/src/main/java/org/hibernate/boot/internal/SessionFactoryBuilderImpl.java
+index e840708..62a959a 100644
+--- a/hibernate-core/src/main/java/org/hibernate/boot/internal/SessionFactoryBuilderImpl.java
++++ b/hibernate-core/src/main/java/org/hibernate/boot/internal/SessionFactoryBuilderImpl.java
+@@ -505,6 +505,7 @@ public class SessionFactoryBuilderImpl implements SessionFactoryBuilderImplement
+ 		private Map querySubstitutions;
+ 		private boolean strictJpaQueryLanguageCompliance;
+ 		private boolean namedQueryStartupCheckingEnabled;
++		private boolean conventionalJavaConstants;
+ 
+ 		// Caching
+ 		private boolean secondLevelCacheEnabled;
+@@ -620,6 +621,8 @@ public class SessionFactoryBuilderImpl implements SessionFactoryBuilderImplement
+ 			this.querySubstitutions = ConfigurationHelper.toMap( QUERY_SUBSTITUTIONS, " ,=;:\n\t\r\f", configurationSettings );
+ 			this.strictJpaQueryLanguageCompliance = cfgService.getSetting( JPAQL_STRICT_COMPLIANCE, BOOLEAN, false );
+ 			this.namedQueryStartupCheckingEnabled = cfgService.getSetting( QUERY_STARTUP_CHECKING, BOOLEAN, true );
++			this.conventionalJavaConstants = cfgService.getSetting(
++					CONVENTIONAL_JAVA_CONSTANTS, BOOLEAN, true );
+ 
+ 			this.secondLevelCacheEnabled = cfgService.getSetting( USE_SECOND_LEVEL_CACHE, BOOLEAN, true );
+ 			this.queryCacheEnabled = cfgService.getSetting( USE_QUERY_CACHE, BOOLEAN, false );
+@@ -853,6 +856,10 @@ public class SessionFactoryBuilderImpl implements SessionFactoryBuilderImplement
+ 			return namedQueryStartupCheckingEnabled;
+ 		}
+ 
++		public boolean isConventionalJavaConstants() {
++			return conventionalJavaConstants;
++		}
++
+ 		@Override
+ 		public boolean isSecondLevelCacheEnabled() {
+ 			return secondLevelCacheEnabled;
+@@ -1119,6 +1126,10 @@ public class SessionFactoryBuilderImpl implements SessionFactoryBuilderImplement
+ 		return options.isNamedQueryStartupCheckingEnabled();
+ 	}
+ 
++	public boolean isConventionalJavaConstants() {
++		return options.isConventionalJavaConstants();
++	}
++
+ 	@Override
+ 	public boolean isSecondLevelCacheEnabled() {
+ 		return options.isSecondLevelCacheEnabled();
+diff --git a/hibernate-core/src/main/java/org/hibernate/boot/internal/SessionFactoryOptionsImpl.java b/hibernate-core/src/main/java/org/hibernate/boot/internal/SessionFactoryOptionsImpl.java
+index 0a09469..b701499 100644
+--- a/hibernate-core/src/main/java/org/hibernate/boot/internal/SessionFactoryOptionsImpl.java
++++ b/hibernate-core/src/main/java/org/hibernate/boot/internal/SessionFactoryOptionsImpl.java
+@@ -87,6 +87,7 @@ public class SessionFactoryOptionsImpl implements SessionFactoryOptions {
+ 	private final Map querySubstitutions;
+ 	private final boolean strictJpaQueryLanguageCompliance;
+ 	private final boolean namedQueryStartupCheckingEnabled;
++	private final boolean conventionalJavaConstants;
+ 
+ 	// Caching
+ 	private final boolean secondLevelCacheEnabled;
+@@ -157,6 +158,7 @@ public class SessionFactoryOptionsImpl implements SessionFactoryOptions {
+ 		this.querySubstitutions = state.getQuerySubstitutions();
+ 		this.strictJpaQueryLanguageCompliance = state.isStrictJpaQueryLanguageCompliance();
+ 		this.namedQueryStartupCheckingEnabled = state.isNamedQueryStartupCheckingEnabled();
++		this.conventionalJavaConstants = state.isConventionalJavaConstants();
+ 
+ 		this.secondLevelCacheEnabled = state.isSecondLevelCacheEnabled();
+ 		this.queryCacheEnabled = state.isQueryCacheEnabled();
+@@ -335,6 +337,10 @@ public class SessionFactoryOptionsImpl implements SessionFactoryOptions {
+ 	}
+ 
+ 	@Override
++	public boolean isConventionalJavaConstants() {
++		return conventionalJavaConstants;
++	}
++
+ 	public boolean isSecondLevelCacheEnabled() {
+ 		return secondLevelCacheEnabled;
+ 	}
+diff --git a/hibernate-core/src/main/java/org/hibernate/boot/internal/SessionFactoryOptionsState.java b/hibernate-core/src/main/java/org/hibernate/boot/internal/SessionFactoryOptionsState.java
+index bdecc03..b7f35e1 100644
+--- a/hibernate-core/src/main/java/org/hibernate/boot/internal/SessionFactoryOptionsState.java
++++ b/hibernate-core/src/main/java/org/hibernate/boot/internal/SessionFactoryOptionsState.java
+@@ -111,6 +111,8 @@ public interface SessionFactoryOptionsState {
+ 
+ 	public boolean isDirectReferenceCacheEntriesEnabled();
+ 
++	boolean isConventionalJavaConstants();
++
+ 	public boolean isAutoEvictCollectionCache();
+ 
+ 	public SchemaAutoTooling getSchemaAutoTooling();
+diff --git a/hibernate-core/src/main/java/org/hibernate/boot/spi/AbstractDelegatingSessionFactoryOptions.java b/hibernate-core/src/main/java/org/hibernate/boot/spi/AbstractDelegatingSessionFactoryOptions.java
+index ecff2c2..c3841f0 100644
+--- a/hibernate-core/src/main/java/org/hibernate/boot/spi/AbstractDelegatingSessionFactoryOptions.java
++++ b/hibernate-core/src/main/java/org/hibernate/boot/spi/AbstractDelegatingSessionFactoryOptions.java
+@@ -197,6 +197,11 @@ public abstract class AbstractDelegatingSessionFactoryOptions implements Session
+ 	}
+ 
+ 	@Override
++	public boolean isConventionalJavaConstants() {
++		return delegate.isConventionalJavaConstants();
++	}
++
++	@Override
+ 	public boolean isSecondLevelCacheEnabled() {
+ 		return delegate.isSecondLevelCacheEnabled();
+ 	}
+diff --git a/hibernate-core/src/main/java/org/hibernate/boot/spi/SessionFactoryOptions.java b/hibernate-core/src/main/java/org/hibernate/boot/spi/SessionFactoryOptions.java
+index 7fc104a..c247a0c 100644
+--- a/hibernate-core/src/main/java/org/hibernate/boot/spi/SessionFactoryOptions.java
++++ b/hibernate-core/src/main/java/org/hibernate/boot/spi/SessionFactoryOptions.java
+@@ -121,6 +121,8 @@ public interface SessionFactoryOptions {
+ 	public boolean isStrictJpaQueryLanguageCompliance();
+ 
+ 	public boolean isNamedQueryStartupCheckingEnabled();
++	
++	boolean isConventionalJavaConstants();
+ 
+ 	public boolean isSecondLevelCacheEnabled();
+ 
+diff --git a/hibernate-core/src/main/java/org/hibernate/cfg/AvailableSettings.java b/hibernate-core/src/main/java/org/hibernate/cfg/AvailableSettings.java
+index d5e3f12..05633a7 100644
+--- a/hibernate-core/src/main/java/org/hibernate/cfg/AvailableSettings.java
++++ b/hibernate-core/src/main/java/org/hibernate/cfg/AvailableSettings.java
+@@ -554,6 +554,17 @@ public interface AvailableSettings {
+ 	String HBM2DDL_AUTO = "hibernate.hbm2ddl.auto";
+ 
+ 	/**
++ 	 * Setting which indicates whether or not Java constant follow the Java Naming conventions.
++	 * <p/>
++	 * Default is {@code true}. Existing applications may want to disable this (set it {@code false}) if non-conventional Java constants are used.
++	 * However, there is a significant performance overhead for using non-conventional Java constants since Hibernate cannot determine if aliases
++	 * should be treated as Java constants or not.
++	 *
++	 * @since 5.2
++	 */
++	String CONVENTIONAL_JAVA_CONSTANTS = "hibernate.query.conventional_java_constants";
++
++	/**
+ 	 * The {@link org.hibernate.exception.spi.SQLExceptionConverter} to use for converting SQLExceptions
+ 	 * to Hibernate's JDBCException hierarchy.  The default is to use the configured
+ 	 * {@link org.hibernate.dialect.Dialect}'s preferred SQLExceptionConverter.
+diff --git a/hibernate-core/src/main/java/org/hibernate/hql/internal/ast/QueryTranslatorImpl.java b/hibernate-core/src/main/java/org/hibernate/hql/internal/ast/QueryTranslatorImpl.java
+index 6479b4a..b616669 100644
+--- a/hibernate-core/src/main/java/org/hibernate/hql/internal/ast/QueryTranslatorImpl.java
++++ b/hibernate-core/src/main/java/org/hibernate/hql/internal/ast/QueryTranslatorImpl.java
+@@ -590,7 +590,6 @@ public class QueryTranslatorImpl implements FilterTranslator {
+ 		private AST dotRoot;
+ 
+ 		public JavaConstantConverter(SessionFactoryImplementor factory) {
+-
+ 			this.factory = factory;
+ 		}
+ 
+@@ -612,7 +611,7 @@ public class QueryTranslatorImpl implements FilterTranslator {
+ 		}
+ 		private void handleDotStructure(AST dotStructureRoot) {
+ 			final String expression = ASTUtil.getPathText( dotStructureRoot );
+-			final Object constant = ReflectHelper.getConstantValue( expression, factory.getServiceRegistry().getService( ClassLoaderService.class ) );
++			final Object constant = ReflectHelper.getConstantValue( expression, factory );
+ 			if ( constant != null ) {
+ 				dotStructureRoot.setFirstChild( null );
+ 				dotStructureRoot.setType( HqlTokenTypes.JAVA_CONSTANT );
+diff --git a/hibernate-core/src/main/java/org/hibernate/hql/internal/ast/tree/JavaConstantNode.java b/hibernate-core/src/main/java/org/hibernate/hql/internal/ast/tree/JavaConstantNode.java
+index a9613b2..9a99cc4 100644
+--- a/hibernate-core/src/main/java/org/hibernate/hql/internal/ast/tree/JavaConstantNode.java
++++ b/hibernate-core/src/main/java/org/hibernate/hql/internal/ast/tree/JavaConstantNode.java
+@@ -9,7 +9,6 @@ package org.hibernate.hql.internal.ast.tree;
+ import java.util.Locale;
+ 
+ import org.hibernate.QueryException;
+-import org.hibernate.boot.registry.classloading.spi.ClassLoaderService;
+ import org.hibernate.dialect.Dialect;
+ import org.hibernate.engine.spi.SessionFactoryImplementor;
+ import org.hibernate.hql.spi.QueryTranslator;
+@@ -39,7 +38,7 @@ public class JavaConstantNode extends Node implements ExpectedTypeAwareNode, Ses
+ 		// this method to get called twice.  The first time with an empty string
+ 		if ( StringHelper.isNotEmpty( s ) ) {
+ 			constantExpression = s;
+-			constantValue = ReflectHelper.getConstantValue( s, factory.getServiceRegistry().getService( ClassLoaderService.class ) );
++			constantValue = ReflectHelper.getConstantValue( s, factory );
+ 			heuristicType = factory.getTypeResolver().heuristicType( constantValue.getClass().getName() );
+ 			super.setText( s );
+ 		}
+diff --git a/hibernate-core/src/main/java/org/hibernate/hql/internal/ast/util/LiteralProcessor.java b/hibernate-core/src/main/java/org/hibernate/hql/internal/ast/util/LiteralProcessor.java
+index e5da5ee..147531d 100644
+--- a/hibernate-core/src/main/java/org/hibernate/hql/internal/ast/util/LiteralProcessor.java
++++ b/hibernate-core/src/main/java/org/hibernate/hql/internal/ast/util/LiteralProcessor.java
+@@ -13,13 +13,11 @@ import java.text.DecimalFormat;
+ import org.hibernate.HibernateException;
+ import org.hibernate.MappingException;
+ import org.hibernate.QueryException;
+-import org.hibernate.boot.registry.classloading.spi.ClassLoaderService;
+ import org.hibernate.dialect.Dialect;
+ import org.hibernate.hql.internal.antlr.HqlSqlTokenTypes;
+ import org.hibernate.hql.internal.antlr.SqlTokenTypes;
+ import org.hibernate.hql.internal.ast.HqlSqlWalker;
+ import org.hibernate.hql.internal.ast.InvalidPathException;
+-import org.hibernate.hql.internal.ast.tree.BooleanLiteralNode;
+ import org.hibernate.hql.internal.ast.tree.DotNode;
+ import org.hibernate.hql.internal.ast.tree.FromClause;
+ import org.hibernate.hql.internal.ast.tree.IdentNode;
+@@ -35,7 +33,6 @@ import org.jboss.logging.Logger;
+ 
+ import antlr.SemanticException;
+ import antlr.collections.AST;
+-import java.util.Locale;
+ 
+ /**
+  * A delegate that handles literals and constants for HqlSqlWalker, performing the token replacement functions and
+@@ -109,7 +106,7 @@ public class LiteralProcessor implements HqlSqlTokenTypes {
+ 			setSQLValue( node, text, discrim );
+ 		}
+ 		else {
+-			Object value = ReflectHelper.getConstantValue( text, walker.getSessionFactoryHelper().getFactory().getServiceRegistry().getService( ClassLoaderService.class ) );
++			Object value = ReflectHelper.getConstantValue( text, walker.getSessionFactoryHelper().getFactory() );
+ 			if ( value == null ) {
+ 				throw new InvalidPathException( "Invalid path: '" + text + "'" );
+ 			}
+diff --git a/hibernate-core/src/main/java/org/hibernate/hql/internal/classic/WhereParser.java b/hibernate-core/src/main/java/org/hibernate/hql/internal/classic/WhereParser.java
+index 1b09019..8faa0b1 100644
+--- a/hibernate-core/src/main/java/org/hibernate/hql/internal/classic/WhereParser.java
++++ b/hibernate-core/src/main/java/org/hibernate/hql/internal/classic/WhereParser.java
+@@ -16,7 +16,6 @@ import java.util.StringTokenizer;
+ 
+ import org.hibernate.MappingException;
+ import org.hibernate.QueryException;
+-import org.hibernate.boot.registry.classloading.spi.ClassLoaderService;
+ import org.hibernate.engine.internal.JoinSequence;
+ import org.hibernate.hql.spi.QueryTranslator;
+ import org.hibernate.internal.util.ReflectHelper;
+@@ -419,7 +418,7 @@ public class WhereParser implements Parser {
+ 				Object constant;
+ 				if (
+ 						token.indexOf( '.' ) > -1 &&
+-						( constant = ReflectHelper.getConstantValue( token, q.getFactory().getServiceRegistry().getService( ClassLoaderService.class ) ) ) != null
++						( constant = ReflectHelper.getConstantValue( token, q.getFactory() ) ) != null
+ 				) {
+ 					Type type;
+ 					try {
+diff --git a/hibernate-core/src/main/java/org/hibernate/internal/util/ReflectHelper.java b/hibernate-core/src/main/java/org/hibernate/internal/util/ReflectHelper.java
+index d7116f5..e5b847e 100644
+--- a/hibernate-core/src/main/java/org/hibernate/internal/util/ReflectHelper.java
++++ b/hibernate-core/src/main/java/org/hibernate/internal/util/ReflectHelper.java
+@@ -13,12 +13,14 @@ import java.lang.reflect.Member;
+ import java.lang.reflect.Method;
+ import java.lang.reflect.Modifier;
+ import java.util.Locale;
++import java.util.regex.Pattern;
+ 
+ import org.hibernate.AssertionFailure;
+ import org.hibernate.MappingException;
+ import org.hibernate.PropertyNotFoundException;
+ import org.hibernate.boot.registry.classloading.spi.ClassLoaderService;
+ import org.hibernate.boot.registry.classloading.spi.ClassLoadingException;
++import org.hibernate.engine.spi.SessionFactoryImplementor;
+ import org.hibernate.property.access.internal.PropertyAccessStrategyMixedImpl;
+ import org.hibernate.property.access.spi.Getter;
+ import org.hibernate.type.PrimitiveType;
+@@ -32,6 +34,10 @@ import org.hibernate.type.Type;
+  */
+ @SuppressWarnings("unchecked")
+ public final class ReflectHelper {
++
++	private static final Pattern JAVA_CONSTANT_PATTERN = Pattern.compile(
++			"[a-z]+\\.([A-Z]{1}[a-z]+)+\\$?([A-Z]{1}[a-z]+)*\\.[A-Z_\\$]+" );
++
+ 	public static final Class[] NO_PARAM_SIGNATURE = new Class[0];
+ 	public static final Object[] NO_PARAMS = new Object[0];
+ 
+@@ -229,9 +235,15 @@ public final class ReflectHelper {
+ 		return PropertyAccessStrategyMixedImpl.INSTANCE.buildPropertyAccess( clazz, name ).getGetter();
+ 	}
+ 
+-	public static Object getConstantValue(String name, ClassLoaderService classLoaderService) {
++	public static Object getConstantValue(String name, SessionFactoryImplementor factory) {
++		boolean conventionalJavaConstants = factory.getSessionFactoryOptions().isConventionalJavaConstants();
+ 		Class clazz;
+ 		try {
++			if ( conventionalJavaConstants &&
++				!JAVA_CONSTANT_PATTERN.matcher( name ).find() ) {
++				return null;
++			}
++			ClassLoaderService classLoaderService = factory.getServiceRegistry().getService( ClassLoaderService.class );
+ 			clazz = classLoaderService.classForName( StringHelper.qualifier( name ) );
+ 		}
+ 		catch ( Throwable t ) {
+@@ -331,7 +343,7 @@ public final class ReflectHelper {
+ 		throw new PropertyNotFoundException( "no appropriate constructor in class: " + clazz.getName() );
+ 
+ 	}
+-	
++
+ 	public static Method getMethod(Class clazz, Method method) {
+ 		try {
+ 			return clazz.getMethod( method.getName(), method.getParameterTypes() );
+diff --git a/hibernate-core/src/test/java/org/hibernate/internal/util/ReflectHelperTest.java b/hibernate-core/src/test/java/org/hibernate/internal/util/ReflectHelperTest.java
+new file mode 100644
+index 0000000..cf2e1cb
+--- /dev/null
++++ b/hibernate-core/src/test/java/org/hibernate/internal/util/ReflectHelperTest.java
+@@ -0,0 +1,126 @@
++/*
++ * Hibernate, Relational Persistence for Idiomatic Java
++ *
++ * License: GNU Lesser General Public License (LGPL), version 2.1 or later.
++ * See the lgpl.txt file in the root directory or <http://www.gnu.org/licenses/lgpl-2.1.html>.
++ */
++package org.hibernate.internal.util;
++
++import javax.persistence.FetchType;
++
++import org.hibernate.boot.registry.classloading.spi.ClassLoaderService;
++import org.hibernate.boot.spi.SessionFactoryOptions;
++import org.hibernate.engine.spi.SessionFactoryImplementor;
++import org.hibernate.service.spi.ServiceRegistryImplementor;
++
++import org.junit.Before;
++import org.junit.Test;
++
++import org.mockito.Mockito;
++
++import static org.junit.Assert.assertEquals;
++import static org.junit.Assert.assertNull;
++import static org.mockito.Matchers.anyString;
++import static org.mockito.Matchers.eq;
++import static org.mockito.Mockito.never;
++import static org.mockito.Mockito.times;
++import static org.mockito.Mockito.verify;
++import static org.mockito.Mockito.when;
++
++/**
++ * @author Vlad Mihalcea
++ */
++public class ReflectHelperTest {
++
++	public enum Status {
++		ON,
++		OFF
++	}
++
++	private SessionFactoryImplementor sessionFactoryImplementorMock;
++
++	private SessionFactoryOptions sessionFactoryOptionsMock;
++
++	private ServiceRegistryImplementor serviceRegistryMock;
++
++	private ClassLoaderService classLoaderServiceMock;
++
++	@Before
++	public void init() {
++		sessionFactoryImplementorMock = Mockito.mock(SessionFactoryImplementor.class);
++		sessionFactoryOptionsMock = Mockito.mock(SessionFactoryOptions.class);
++		when(sessionFactoryImplementorMock.getSessionFactoryOptions()).thenReturn( sessionFactoryOptionsMock );
++
++		serviceRegistryMock = Mockito.mock(ServiceRegistryImplementor.class);
++		when( sessionFactoryImplementorMock.getServiceRegistry() ).thenReturn( serviceRegistryMock );
++
++		classLoaderServiceMock = Mockito.mock(ClassLoaderService.class);
++		when( serviceRegistryMock.getService( eq( ClassLoaderService.class ) ) ).thenReturn( classLoaderServiceMock );
++	}
++
++	@Test
++	public void test_getConstantValue_simpleAlias() {
++		when( sessionFactoryOptionsMock.isConventionalJavaConstants() ).thenReturn( true );
++
++		Object value = ReflectHelper.getConstantValue( "alias.b", sessionFactoryImplementorMock);
++		assertNull(value);
++		verify(classLoaderServiceMock, never()).classForName( anyString() );
++	}
++
++	@Test
++	public void test_getConstantValue_simpleAlias_non_conventional() {
++		when( sessionFactoryOptionsMock.isConventionalJavaConstants() ).thenReturn( false );
++
++		Object value = ReflectHelper.getConstantValue( "alias.b", sessionFactoryImplementorMock);
++		assertNull(value);
++		verify(classLoaderServiceMock, times(1)).classForName( eq( "alias" ) );
++	}
++
++	@Test
++	public void test_getConstantValue_nestedAlias() {
++		when( sessionFactoryOptionsMock.isConventionalJavaConstants() ).thenReturn( true );
++
++		Object value = ReflectHelper.getConstantValue( "alias.b.c", sessionFactoryImplementorMock);
++		assertNull(value);
++		verify(classLoaderServiceMock, never()).classForName( anyString() );
++	}
++
++	@Test
++	public void test_getConstantValue_nestedAlias_non_conventional() {
++		when( sessionFactoryOptionsMock.isConventionalJavaConstants() ).thenReturn( false );
++
++		Object value = ReflectHelper.getConstantValue( "alias.b.c", sessionFactoryImplementorMock);
++		assertNull(value);
++		verify(classLoaderServiceMock, times(1)).classForName( eq( "alias.b" ) );
++	}
++
++	@Test
++	public void test_getConstantValue_outerEnum() {
++		when( sessionFactoryOptionsMock.isConventionalJavaConstants() ).thenReturn( true );
++
++		when( classLoaderServiceMock.classForName( "javax.persistence.FetchType" ) ).thenReturn( (Class) FetchType.class );
++		Object value = ReflectHelper.getConstantValue( "javax.persistence.FetchType.LAZY", sessionFactoryImplementorMock);
++		assertEquals( FetchType.LAZY, value );
++		verify(classLoaderServiceMock, times(1)).classForName( eq("javax.persistence.FetchType") );
++	}
++
++	@Test
++	public void test_getConstantValue_enumClass() {
++		when( sessionFactoryOptionsMock.isConventionalJavaConstants() ).thenReturn( true );
++
++		when( classLoaderServiceMock.classForName( "org.hibernate.internal.util.ReflectHelperTest$Status" ) ).thenReturn( (Class) Status.class );
++		Object value = ReflectHelper.getConstantValue( "org.hibernate.internal.util.ReflectHelperTest$Status", sessionFactoryImplementorMock);
++		assertNull(value);
++		verify(classLoaderServiceMock, never()).classForName( eq("org.hibernate.internal.util") );
++	}
++
++	@Test
++	public void test_getConstantValue_nestedEnum() {
++
++		when( sessionFactoryOptionsMock.isConventionalJavaConstants() ).thenReturn( true );
++		when( classLoaderServiceMock.classForName( "org.hibernate.internal.util.ReflectHelperTest$Status" ) ).thenReturn( (Class) Status.class );
++		Object value = ReflectHelper.getConstantValue( "org.hibernate.internal.util.ReflectHelperTest$Status.ON", sessionFactoryImplementorMock);
++		assertEquals( Status.ON, value );
++		verify(classLoaderServiceMock, times(1)).classForName( eq("org.hibernate.internal.util.ReflectHelperTest$Status") );
++	}
++}
+\ No newline at end of file
+-- 
+2.9.5
+
