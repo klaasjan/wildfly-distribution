@@ -1,18 +1,16 @@
-FROM centos:7
+FROM docker.topicusonderwijs.nl/jboss/base-jdk:8
 
 ENV WILDFLY_VERSION 10.1.0.Final
 ENV WILDFLY_SHA1 9ee3c0255e2e6007d502223916cefad2a1a5e333
 
 ENV WILDFLY_TOPICUS_VERSION $WILDFLY_VERSION.topicus4
 
+USER root
+
 WORKDIR /tmp
 
-# Install tooling, e.g. git, java and gradle
-RUN yum install -y wget unzip git java-1.8.0-openjdk-devel \
-    && wget -q https://services.gradle.org/distributions/gradle-2.7-bin.zip \
-    && mkdir /opt/gradle \
-    && unzip -d /opt/gradle gradle-2.7-bin.zip \
-    && ln -s /opt/gradle/gradle-2.7/bin/gradle /usr/bin/gradle
+# Install tooling, e.g. git
+RUN yum install -y git && yum clean all
 
 # Download and unpack Wildfly distribution
 RUN curl -O https://download.jboss.org/wildfly/$WILDFLY_VERSION/wildfly-$WILDFLY_VERSION.tar.gz \
@@ -42,11 +40,11 @@ COPY *.patch /tmp/
 # Patch and build a new Hibernate 5.0.10
 ENV HIBERNATE_BASE=/tmp/wildfly-$WILDFLY_VERSION/modules/system/layers/base/org/hibernate
 WORKDIR /tmp
-RUN git clone --branch 5.0.10 https://github.com/hibernate/hibernate-orm.git
+RUN git clone --branch 5.0.10 --depth 1 -c advice.detachedHead=false https://github.com/hibernate/hibernate-orm.git
 WORKDIR /tmp/hibernate-orm
 RUN git apply -v /tmp/hib5010.patch /tmp/HHH-4959.patch /tmp/HHH-4959-1.patch /tmp/HHH-11377.patch
 RUN export JAVA_HOME=/usr/lib/jvm/jre-openjdk \
-    && gradle hibernate-core:build hibernate-infinispan:build -x checkstyleMain -x findbugsMain -x compileTestJava -x compileTestGroovy -x processTestResources -x testClasses -x findbugsTest -x test \
+    && ./gradlew hibernate-core:build hibernate-infinispan:build -x checkstyleMain -x findbugsMain -x compileTestJava -x compileTestGroovy -x processTestResources -x testClasses -x findbugsTest -x test \
     && cp hibernate-core/target/libs/hibernate-core-5.0.10.Final.jar $HIBERNATE_BASE/main/ \
     && cp hibernate-infinispan/target/libs/hibernate-infinispan-5.0.10.Final.jar $HIBERNATE_BASE/infinispan/main/
     
