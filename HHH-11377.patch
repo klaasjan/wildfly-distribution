@@ -1,22 +1,8 @@
-From 8921cd02e10de8bd341a0328ee598d5bcd239c4f Mon Sep 17 00:00:00 2001
-From: Vlad Mihalcea <mihalcea.vlad@gmail.com>
-Date: Tue, 10 Jan 2017 13:51:32 +0200
-Subject: [PATCH] HHH-11377 - ReflectHelper#getConstantValue should consider
- digits as well
-
----
- build.gradle                                              |  8 ++++++++
- .../java/org/hibernate/internal/util/ReflectHelper.java   |  2 +-
- .../org/hibernate/internal/util/ReflectHelperTest.java    | 11 +++++++++++
- .../hibernate/internal/util/hib3rnat3/C0nst4nts३.java   | 15 +++++++++++++++
- 4 files changed, 35 insertions(+), 1 deletion(-)
- create mode 100644 hibernate-core/src/test/java/org/hibernate/internal/util/hib3rnat3/C0nst4nts३.java
-
 diff --git a/build.gradle b/build.gradle
-index 3e055ae..b7bcfcb 100644
+index 343ec44..e74b8dc 100644
 --- a/build.gradle
 +++ b/build.gradle
-@@ -146,6 +146,14 @@ subprojects { subProject ->
+@@ -171,6 +171,14 @@ subprojects { subProject ->
  	}
  	// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
  
@@ -93,6 +79,3 @@ index 0000000..45ae620
 +
 +	public static final String ABC_DEF = "xyz";
 +}
--- 
-2.9.5
-
