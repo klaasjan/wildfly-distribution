@@ -1,0 +1,43 @@
+diff --git a/hibernate-infinispan/src/main/java/org/hibernate/cache/infinispan/access/NonTxInvalidationCacheAccessDelegate.java b/hibernate-infinispan/src/main/java/org/hibernate/cache/infinispan/access/NonTxInvalidationCacheAccessDelegate.java
+index ac8a7bd4d7..906a5b2852 100644
+--- a/hibernate-infinispan/src/main/java/org/hibernate/cache/infinispan/access/NonTxInvalidationCacheAccessDelegate.java
++++ b/hibernate-infinispan/src/main/java/org/hibernate/cache/infinispan/access/NonTxInvalidationCacheAccessDelegate.java
+@@ -8,6 +8,7 @@ package org.hibernate.cache.infinispan.access;
+ 
+ import org.hibernate.cache.CacheException;
+ import org.hibernate.cache.infinispan.impl.BaseRegion;
++import org.hibernate.cache.infinispan.util.Caches;
+ import org.hibernate.cache.spi.access.SoftLock;
+ import org.hibernate.engine.spi.SessionImplementor;
+ import org.hibernate.resource.transaction.TransactionCoordinator;
+@@ -83,4 +84,17 @@ public class NonTxInvalidationCacheAccessDelegate extends InvalidationCacheAcces
+ 		// endInvalidatingKeys is called from NonTxInvalidationInterceptor, from the synchronization callback
+ 		return false;
+ 	}
++
++       @Override
++       public void removeAll() throws CacheException {
++               try {
++                       if (!putValidator.beginInvalidatingRegion()) {
++                               log.error("Failed to invalidate pending putFromLoad calls for region " + region.getName());
++                       }
++                       cache.clear();
++               }
++               finally {
++                       putValidator.endInvalidatingRegion();
++               }
++       }
+ }
+diff --git a/hibernate-infinispan/src/main/java/org/hibernate/cache/infinispan/impl/BaseRegion.java b/hibernate-infinispan/src/main/java/org/hibernate/cache/infinispan/impl/BaseRegion.java
+index 239327e2ca..1dbd04695f 100644
+--- a/hibernate-infinispan/src/main/java/org/hibernate/cache/infinispan/impl/BaseRegion.java
++++ b/hibernate-infinispan/src/main/java/org/hibernate/cache/infinispan/impl/BaseRegion.java
+@@ -242,7 +242,7 @@ public abstract class BaseRegion implements Region {
+ 		// When we don't have transaction, we can do a clear operation (since we don't
+ 		// case about context) and can't do the one-by-one remove: remove() on tx cache
+ 		// requires transactional context.
+-		if ( inTransaction ) {
++		if ( inTransaction && cache.getCacheConfiguration().transaction().transactionMode().isTransactional() ) {
+ 			log.tracef( "Transaction, clearing one element at the time" );
+ 			Caches.removeAll( localAndSkipLoadCache );
+ 		}

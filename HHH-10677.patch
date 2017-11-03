@@ -1,0 +1,16 @@
+diff --git a/hibernate-infinispan/src/main/java/org/hibernate/cache/infinispan/timestamp/ClusteredTimestampsRegionImpl.java b/hibernate-infinispan/src/main/java/org/hibernate/cache/infinispan/timestamp/ClusteredTimestampsRegionImpl.java
+index 1dda8d363b..d91e5d4c64 100644
+--- a/hibernate-infinispan/src/main/java/org/hibernate/cache/infinispan/timestamp/ClusteredTimestampsRegionImpl.java
++++ b/hibernate-infinispan/src/main/java/org/hibernate/cache/infinispan/timestamp/ClusteredTimestampsRegionImpl.java
+@@ -146,4 +146,11 @@ public class ClusteredTimestampsRegionImpl extends TimestampsRegionImpl {
+ 		localCache.remove( event.getKey() );
+ 	}
+ 
++       @Override
++       public void put(SessionImplementor session, final Object key, final Object value)
++                       throws CacheException
++       {
++               super.put(session, key, value);
++               localCache.put(key, value);
++       }
+ }
