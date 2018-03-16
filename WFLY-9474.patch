@@ -1,0 +1,17 @@
+diff --git a/clustering/jgroups/extension/src/main/java/org/jboss/as/clustering/jgroups/protocol/NAKACK2.java b/clustering/jgroups/extension/src/main/java/org/jboss/as/clustering/jgroups/protocol/NAKACK2.java
+index 4d13cb3767..0aab18a04a 100644
+--- a/clustering/jgroups/extension/src/main/java/org/jboss/as/clustering/jgroups/protocol/NAKACK2.java
++++ b/clustering/jgroups/extension/src/main/java/org/jboss/as/clustering/jgroups/protocol/NAKACK2.java
+@@ -32,7 +32,9 @@ public class NAKACK2 extends org.jgroups.protocols.pbcast.NAKACK2 implements Mul
+ 
+     @Override
+     public void setMulticast(boolean enabled) {
+-        this.use_mcast_xmit = enabled;
+-        this.use_mcast_xmit_req = enabled;
++        if (!enabled) {
++            this.use_mcast_xmit = false;
++            this.use_mcast_xmit_req = false;
++        }
+     }
+ }
+

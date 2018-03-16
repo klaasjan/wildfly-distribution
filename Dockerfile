@@ -17,6 +17,7 @@ WORKDIR /tmp
 RUN git clone --branch $WILDFLY_VERSION --depth 1 -c advice.detachedHead=false https://github.com/wildfly/wildfly.git
 WORKDIR /tmp/wildfly
 RUN git apply -v /tmp/WFLY-9488.patch
+RUN git apply -v /tmp/WFLY-9474.patch
 RUN ./build.sh -DskipTests
 RUN mv /tmp/wildfly/dist/target/wildfly-$WILDFLY_VERSION /tmp
 
